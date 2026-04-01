@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+package-lock.json
+
+# Minecraft server (large files)
+minecraft/server/paper.jar
+minecraft/server/cache/
+minecraft/server/libraries/
+minecraft/server/versions/
+minecraft/server/logs/
+minecraft/server/config/
+minecraft/server/plugins/
+minecraft/server/arena*/
+minecraft/server/.console_history
+minecraft/server/*.yml
+minecraft/server/*.json
+!minecraft/server/server.properties
+!minecraft/server/eula.txt
+
+# Models (large, can retrain)
+models/
+
+# Logs
+*.log
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Claude
+.claude/
