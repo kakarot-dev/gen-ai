@@ -1,23 +1,26 @@
-"""RL environment for training GOAP goal selection.
+"""RL environment for training GOAP goal selection with tactical awareness.
 
-The agent observes the game state and picks which GOAP goal to pursue.
-Mineflayer handles execution. This trains the DECISION-MAKING, not movement.
+The agent observes the game state (including line-of-sight and cover info)
+and picks which GOAP goal to pursue.
 
-Observation (15 floats):
-    - own health (0-1)
-    - own food/stamina (0-1)
-    - distance to target (0-1, normalized)
-    - direction to target (dx, dz normalized)
-    - target health (0-1)
-    - in melee range (bool)
-    - in bow range (bool)
-    - target too close (bool)
-    - target too far (bool)
-    - currently low health (bool)
-    - previous goal (one-hot, but simplified to index 0-11 normalized)
-    - time on current goal (0-1)
-    - damage dealt last window (0-1)
-    - damage taken last window (0-1)
+Observation (17 floats):
+    0  own health (0-1)
+    1  own stamina (0-1)
+    2  distance to target (0-1)
+    3  direction dx (0-1)
+    4  direction dz (0-1)
+    5  target health (0-1)
+    6  in melee range
+    7  in bow range
+    8  target too close
+    9  target too far
+    10 low health
+    11 previous goal (0-1)
+    12 time on current goal (0-1)
+    13 damage dealt last window (0-1)
+    14 damage taken last window (0-1)
+    15 line-of-sight to target (bool)
+    16 cover available nearby (bool)
 
 Action: Discrete(12) — pick one of 12 GOAP goals
 """
@@ -60,7 +63,7 @@ class GoalSelectionEnv(gym.Env):
         self.max_decisions = max_decisions  # max decisions per episode
 
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(15,), dtype=np.float32
+            low=0.0, high=1.0, shape=(17,), dtype=np.float32
         )
         self.action_space = spaces.Discrete(NUM_GOALS)
 
@@ -143,8 +146,17 @@ class GoalSelectionEnv(gym.Env):
 
         return self._get_obs(), reward, terminated, truncated, info
 
+    def _has_los(self) -> bool:
+        return self.engine.arena.has_line_of_sight(
+            self.agent.x, self.agent.z, self.opponent.x, self.opponent.z)
+
+    def _cover_nearby(self) -> bool:
+        cover = self.engine.arena.nearest_cover(
+            self.agent.x, self.agent.z, self.opponent.x, self.opponent.z)
+        return cover is not None
+
     def _get_obs(self) -> np.ndarray:
-        obs = np.zeros(15, dtype=np.float32)
+        obs = np.zeros(17, dtype=np.float32)
         a = self.agent
         o = self.opponent
 
@@ -156,96 +168,140 @@ class GoalSelectionEnv(gym.Env):
         obs[0] = a.health / cfg.MAX_HEALTH
         obs[1] = a.stamina / cfg.MAX_STAMINA
         obs[2] = min(dist / 300, 1.0)
-        obs[3] = (dx / d + 1) / 2  # normalize to 0-1
+        obs[3] = (dx / d + 1) / 2
         obs[4] = (dz / d + 1) / 2
         obs[5] = o.health / cfg.MAX_HEALTH
-        obs[6] = 1.0 if dist < 50 else 0.0   # melee range
-        obs[7] = 1.0 if 50 < dist < 250 else 0.0  # bow range
-        obs[8] = 1.0 if dist < 60 else 0.0   # too close
-        obs[9] = 1.0 if dist > 250 else 0.0  # too far
-        obs[10] = 1.0 if a.health < 35 else 0.0  # low health
-        obs[11] = self.current_goal_idx / NUM_GOALS  # previous goal
+        obs[6] = 1.0 if dist < 50 else 0.0
+        obs[7] = 1.0 if 50 < dist < 250 else 0.0
+        obs[8] = 1.0 if dist < 60 else 0.0
+        obs[9] = 1.0 if dist > 250 else 0.0
+        obs[10] = 1.0 if a.health < 35 else 0.0
+        obs[11] = self.current_goal_idx / NUM_GOALS
         obs[12] = min(self._goal_time / self.decision_interval, 1.0)
-        obs[13] = min(self._dmg_dealt_window / 30, 1.0)  # recent damage dealt
-        obs[14] = min(self._dmg_taken_window / 30, 1.0)  # recent damage taken
+        obs[13] = min(self._dmg_dealt_window / 30, 1.0)
+        obs[14] = min(self._dmg_taken_window / 30, 1.0)
+        obs[15] = 1.0 if self._has_los() else 0.0
+        obs[16] = 1.0 if self._cover_nearby() else 0.0
 
         return obs
 
     def _compute_reward(self, dmg_dealt: float, dmg_taken: float) -> float:
+        """Reward: damage is everything, tactical use of cover is rewarded."""
         reward = 0.0
 
-        # Core combat rewards
-        reward += dmg_dealt * 0.15
-        reward -= dmg_taken * 0.1
+        # Damage is the primary signal
+        reward += dmg_dealt * 0.5       # 1 HP damage = +0.5
+        reward -= dmg_taken * 0.15
 
+        # Terminal rewards
         if not self.opponent.alive:
-            reward += 15.0
+            reward += 30.0  # kill is the goal
         if not self.agent.alive:
-            reward -= 15.0
-        if self.agent.alive:
-            reward += 0.1
+            reward -= 10.0
 
         goal = GOAL_NAMES[self.current_goal_idx]
         dist = self.agent.distance_to(self.opponent)
         health_pct = self.agent.health / cfg.MAX_HEALTH
 
+        # ── Tactical awareness ──
+        has_los = self._has_los()
+        # Dealt damage while opponent couldn't see us (shot through cover / from behind wall)
+        if dmg_dealt > 0 and not has_los:
+            reward += 1.5  # ambush bonus
+        # Broke line of sight while retreating (successful disengagement)
+        if not has_los and goal in ("retreat", "dash_away", "flank_target", "find_vantage_point"):
+            if dmg_taken < dmg_dealt or dmg_taken == 0:
+                reward += 0.8  # used cover effectively
+
+        # ── Anti-passivity: STRONG penalty for not engaging ──
+        if dmg_dealt == 0 and self.opponent.alive:
+            reward -= 1.0
+            if dist > 150:
+                reward -= 0.5
+
+        # No reward for dash_away spam — must be justified by actual HP loss
+        if goal in ("dash_away", "retreat") and health_pct > 0.35:
+            reward -= 2.0
+
         # ── Role-specific rewards ──
         if self.npc_type == "zombie":
-            # ZOMBIE: rewarded for closing distance, melee combat, flanking
-            if goal in ("chase_target", "melee_attack", "dash_attack", "flank_target"):
-                if dmg_dealt > 0:
-                    reward += 2.0  # big bonus for landing melee hits
+            # ZOMBIE: MUST close distance and deal melee damage
+            if goal in ("chase_target", "melee_attack", "dash_attack"):
                 if dist < 50:
-                    reward += 0.5  # good — you're close
+                    reward += 0.3  # in melee range
                 elif dist < 100:
-                    reward += 0.2  # ok — getting closer
+                    reward += 0.1
                 else:
-                    reward -= 0.2  # too far for melee
+                    reward -= 0.3
+                if dmg_dealt > 0:
+                    reward += 1.0  # bonus for landing hits
 
             elif goal == "flank_target":
-                reward += 0.3  # flanking is smart for melee
-
-            elif goal in ("retreat", "dash_away"):
-                if health_pct < 0.25:
-                    reward += 1.0  # critical HP, smart to retreat
-                elif health_pct < 0.4:
-                    reward += 0.3  # hurt, ok to retreat
-                else:
-                    reward -= 1.0  # healthy zombie retreating = BAD
-
-            elif goal in ("ranged_attack", "kite_target", "maintain_distance"):
-                reward -= 0.5  # zombie should NOT be kiting
-
-            elif goal == "heal":
-                if health_pct < 0.3:
-                    reward += 0.5
+                if dist < 80:
+                    reward += 0.2
                 else:
                     reward -= 0.3
 
-        elif self.npc_type == "skeleton":
-            # SKELETON: rewarded for keeping distance, ranged attacks, kiting
-            if goal in ("ranged_attack", "kite_target", "maintain_distance"):
-                if dmg_dealt > 0:
-                    reward += 2.0  # ranged hit = great
-                if 80 < dist < 220:
-                    reward += 0.5  # perfect range
-                elif dist < 50:
-                    reward -= 0.5  # too close for skeleton
+            elif goal in ("retreat", "dash_away"):
+                if health_pct < 0.2:
+                    reward += 1.5   # critical HP, smart retreat
+                elif health_pct < 0.35:
+                    reward += 0.3
+                # above 35% already handled by global penalty
+
+            elif goal in ("ranged_attack", "kite_target", "maintain_distance"):
+                reward -= 1.5  # wrong role — hard penalty
+
+            elif goal == "heal":
+                if health_pct > 0.4:
+                    reward -= 2.0  # don't heal when ok
+                elif health_pct < 0.2:
+                    reward += 0.3
 
             elif goal == "find_vantage_point":
-                reward += 0.3  # repositioning is smart
+                reward -= 1.0  # zombies don't need vantage points
+
+            elif goal == "idle":
+                reward -= 2.0  # never idle
+
+        elif self.npc_type == "skeleton":
+            # SKELETON: keep range AND deal damage
+            if goal in ("ranged_attack", "kite_target"):
+                if 60 < dist < 220:
+                    reward += 0.3  # good range
+                elif dist < 40:
+                    reward -= 0.6
+                if dmg_dealt > 0:
+                    reward += 1.0
+
+            elif goal == "maintain_distance":
+                if 60 < dist < 220:
+                    reward += 0.1
+                if dmg_dealt == 0:
+                    reward -= 0.5  # must still engage
+
+            elif goal == "find_vantage_point":
+                if dist < 40 or dist > 250:
+                    reward += 0.1  # ok when out of range
+                else:
+                    reward -= 0.8  # wasting time at good range
 
             elif goal in ("chase_target", "melee_attack", "dash_attack"):
                 if dist > 80:
-                    reward -= 0.5  # skeleton shouldn't melee from far
+                    reward -= 1.5  # wrong role
                 elif dmg_dealt > 0:
-                    reward += 0.5  # close range hit, ok
+                    reward += 0.3
 
             elif goal in ("retreat", "dash_away"):
-                if health_pct < 0.4 or dist < 50:
-                    reward += 0.5  # retreating when close/hurt = smart
-                else:
-                    reward -= 0.3
+                if health_pct < 0.25 or dist < 30:
+                    reward += 0.5
+
+            elif goal == "heal":
+                if health_pct > 0.4:
+                    reward -= 2.0
+
+            elif goal == "idle":
+                reward -= 2.0
 
         return reward
 
@@ -308,7 +364,14 @@ class GoalSelectionEnv(gym.Env):
                 return GameAction(ActionType.DASH, toward)
             return GameAction(ActionType.MOVE, toward)
         elif goal_name == "flank_target":
-            perp_angle = math.atan2(dx, -dz)  # perpendicular
+            # Try to move to a cover point that breaks LoS first
+            cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
+            if cover is not None:
+                cdx = cover[0] - a.x
+                cdz = cover[1] - a.z
+                return GameAction(ActionType.MOVE, self._dir_from_vec(cdx, cdz))
+            # Fallback: perpendicular
+            perp_angle = math.atan2(dx, -dz)
             pdeg = math.degrees(perp_angle) % 360
             if pdeg < 45 or pdeg >= 315: perp = MoveDirection.RIGHT
             elif pdeg < 135: perp = MoveDirection.DOWN
@@ -326,12 +389,47 @@ class GoalSelectionEnv(gym.Env):
                 return GameAction(ActionType.MOVE, toward)
             return GameAction(ActionType.BOW_ATTACK, toward) if a.can_bow() else GameAction(ActionType.MOVE, toward)
         elif goal_name in ("retreat", "dash_away"):
-            if a.can_dash():
-                return GameAction(ActionType.DASH, away)
-            return GameAction(ActionType.MOVE, away)
+            # Retreat toward cover if available
+            cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
+            if cover is not None:
+                cdx = cover[0] - a.x
+                cdz = cover[1] - a.z
+                retreat_dir = self._dir_from_vec(cdx, cdz)
+            else:
+                retreat_dir = away
+            if goal_name == "dash_away" and a.can_dash():
+                return GameAction(ActionType.DASH, retreat_dir)
+            return GameAction(ActionType.MOVE, retreat_dir)
         elif goal_name == "heal":
+            # Move toward cover while healing
+            cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
+            if cover is not None:
+                cdx = cover[0] - a.x
+                cdz = cover[1] - a.z
+                return GameAction(ActionType.MOVE, self._dir_from_vec(cdx, cdz))
             return GameAction(ActionType.MOVE, away)
         elif goal_name == "find_vantage_point":
+            # Move to a cover point with good firing angle
+            cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
+            if cover is not None:
+                cdx = cover[0] - a.x
+                cdz = cover[1] - a.z
+                return GameAction(ActionType.MOVE, self._dir_from_vec(cdx, cdz))
             return GameAction(ActionType.MOVE, away)
         else:
             return GameAction(ActionType.NOOP, MoveDirection.NONE)
+
+    def _dir_from_vec(self, dx: float, dz: float) -> MoveDirection:
+        """Convert a (dx, dz) vector to the closest MoveDirection."""
+        if abs(dx) < 0.1 and abs(dz) < 0.1:
+            return MoveDirection.NONE
+        angle = math.atan2(dz, dx)
+        deg = math.degrees(angle) % 360
+        if deg < 22.5 or deg >= 337.5: return MoveDirection.RIGHT
+        elif deg < 67.5: return MoveDirection.DOWN_RIGHT
+        elif deg < 112.5: return MoveDirection.DOWN
+        elif deg < 157.5: return MoveDirection.DOWN_LEFT
+        elif deg < 202.5: return MoveDirection.LEFT
+        elif deg < 247.5: return MoveDirection.UP_LEFT
+        elif deg < 292.5: return MoveDirection.UP
+        else: return MoveDirection.UP_RIGHT

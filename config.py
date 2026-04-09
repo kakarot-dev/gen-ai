@@ -1,14 +1,7 @@
 """Global configuration for the game."""
 
 # --- Display ---
-SCREEN_WIDTH = 960
-SCREEN_HEIGHT = 640
 TILE_SIZE = 32
-FPS = 60
-
-# --- Arena ---
-ARENA_COLS = SCREEN_WIDTH // TILE_SIZE   # 30
-ARENA_ROWS = SCREEN_HEIGHT // TILE_SIZE  # 20
 
 # Tile types
 TILE_EMPTY = 0
@@ -28,7 +21,6 @@ SWORD_DAMAGE = 15
 SWORD_RANGE = 40
 SWORD_COOLDOWN = 30       # frames
 BOW_DAMAGE = 10
-BOW_RANGE = 250
 BOW_COOLDOWN = 60         # frames
 BOW_PROJECTILE_SPEED = 6.0
 SHIELD_STAMINA_COST = 0.5  # per frame while blocking
@@ -46,11 +38,10 @@ LAVA_TICK_RATE = 15  # damage every N frames
 GRAVITY = 0.4
 JUMP_FORCE = 7.0
 JUMP_STAMINA_COST = 10
-GROUND_Y = 0.0  # ground plane height
+GROUND_Y = 0.0
 
 # --- Dash ---
 DASH_SPEED = 8.0
 DASH_DURATION = 8   # frames
 DASH_COOLDOWN = 90   # frames
 DASH_STAMINA_COST = 25
-

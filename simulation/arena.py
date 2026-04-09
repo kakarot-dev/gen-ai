@@ -52,6 +52,61 @@ class Arena:
     def is_lava(self, col: int, row: int) -> bool:
         return self.get_tile(col, row) == cfg.TILE_LAVA
 
+    def blocks_sight(self, col: int, row: int) -> bool:
+        """Does this tile block line of sight?"""
+        tile = self.get_tile(col, row)
+        return tile in (cfg.TILE_STONE, cfg.TILE_WOOD)
+
+    def has_line_of_sight(self, x1: float, y1: float, x2: float, y2: float) -> bool:
+        """Raycast between two points — True if no wall blocks."""
+        import math
+        dist = math.hypot(x2 - x1, y2 - y1)
+        if dist < 1:
+            return True
+        steps = max(int(dist / (cfg.TILE_SIZE * 0.5)), 2)
+        for i in range(1, steps):
+            t = i / steps
+            x = x1 + (x2 - x1) * t
+            y = y1 + (y2 - y1) * t
+            col, row = self.pixel_to_tile(x, y)
+            if self.blocks_sight(col, row):
+                return False
+        return True
+
+    def nearest_cover(self, x: float, y: float, from_x: float, from_y: float,
+                      max_search_radius: int = 8):
+        """Find closest wall tile that blocks LoS from (from_x, from_y).
+
+        Returns (tile_col, tile_row) or None.
+        """
+        import math
+        cx, cy = self.pixel_to_tile(x, y)
+        best = None
+        best_dist = float('inf')
+        for dr in range(-max_search_radius, max_search_radius + 1):
+            for dc in range(-max_search_radius, max_search_radius + 1):
+                col, row = cx + dc, cy + dr
+                if not (0 <= row < self.rows and 0 <= col < self.cols):
+                    continue
+                if not self.blocks_sight(col, row):
+                    continue
+                # Position behind the wall (opposite side from attacker)
+                wx = col * cfg.TILE_SIZE + cfg.TILE_SIZE / 2
+                wy = row * cfg.TILE_SIZE + cfg.TILE_SIZE / 2
+                # Place agent on opposite side of wall from attacker
+                ax = from_x - wx
+                ay = from_y - wy
+                norm = math.hypot(ax, ay) + 1e-6
+                behind_x = wx - (ax / norm) * cfg.TILE_SIZE
+                behind_y = wy - (ay / norm) * cfg.TILE_SIZE
+                d = math.hypot(behind_x - x, behind_y - y)
+                if d < best_dist:
+                    # Validate walkability
+                    if self.is_position_walkable(behind_x, behind_y, cfg.TILE_SIZE * 0.4):
+                        best = (behind_x, behind_y)
+                        best_dist = d
+        return best
+
     def pixel_to_tile(self, x: float, y: float) -> tuple[int, int]:
         return int(x // cfg.TILE_SIZE), int(y // cfg.TILE_SIZE)
 
