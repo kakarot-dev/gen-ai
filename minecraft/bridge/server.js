@@ -185,19 +185,14 @@ function runBehavior(entry) {
         }
         break;
 
-      case 'flank_target':
-        // Move to side of player
-        const tp = target.entity.position;
-        const bp = bot.entity.position;
-        const dx = tp.x - bp.x;
-        const dz = tp.z - bp.z;
-        const d = Math.sqrt(dx*dx + dz*dz) + 0.1;
-        let fx = clamp(tp.x + (dz/d)*6, ARENA.minX, ARENA.maxX);
-        let fz = clamp(tp.z - (dx/d)*6, ARENA.minZ, ARENA.maxZ);
-        bot.pathfinder.setGoal(new goals.GoalNear(fx, ARENA.y, fz, 1), true);
+      case 'flank_target': {
+        // Move to cover point that breaks LoS, then approach from there
+        const cover = findCover(bot.entity.position, target.entity.position);
+        bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 1), true);
         bot.setControlState('sprint', true);
         if (dist <= MELEE_REACH && canAttack()) bot.attack(target.entity);
         break;
+      }
 
       case 'ranged_attack':
         // Keep distance, attack
@@ -211,25 +206,23 @@ function runBehavior(entry) {
         break;
 
       case 'find_vantage_point': {
-        // Reposition to good range AND attack — don't just run
-        if (dist < 8) {
-          // Too close — back up to medium range
-          bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, 14), true);
-        } else if (dist > 22) {
-          // Too far — close in
-          bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, 12), true);
-        }
-        // Always attack while repositioning
-        if (canAttack()) bot.attack(target.entity);
+        // Go to a cover point that gives a good firing angle
+        const cover = findCover(bot.entity.position, target.entity.position);
+        bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 2), true);
+        bot.setControlState('sprint', true);
+        // Shoot while repositioning
+        if (dist < 25 && canAttack()) bot.attack(target.entity);
         break;
       }
 
       case 'maintain_distance':
       case 'kite_target':
-      case 'control_space':
-        // Keep at 10-18 range, strafe, and SHOOT
+      case 'control_space': {
+        // Duck behind cover when too close, otherwise strafe-shoot
         if (dist < 8) {
-          bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, 14), true);
+          // Too close — retreat to cover
+          const cover = findCover(bot.entity.position, target.entity.position);
+          bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 1), true);
           bot.setControlState('sprint', true);
         } else if (dist > 22) {
           bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, 10), true);
@@ -245,6 +238,7 @@ function runBehavior(entry) {
         // Always attack
         if (canAttack()) bot.attack(target.entity);
         break;
+      }
 
       case 'retreat':
       case 'dash_away': {

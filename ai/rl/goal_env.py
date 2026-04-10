@@ -186,122 +186,144 @@ class GoalSelectionEnv(gym.Env):
         return obs
 
     def _compute_reward(self, dmg_dealt: float, dmg_taken: float) -> float:
-        """Reward: damage is everything, tactical use of cover is rewarded."""
+        """Balanced reward: rewards engagement AND tactical cover use."""
         reward = 0.0
 
-        # Damage is the primary signal
-        reward += dmg_dealt * 0.5       # 1 HP damage = +0.5
-        reward -= dmg_taken * 0.15
+        # Damage is the primary signal — boosted
+        reward += dmg_dealt * 0.8       # each HP damage = +0.8
+        reward -= dmg_taken * 0.1       # softer penalty
 
         # Terminal rewards
         if not self.opponent.alive:
-            reward += 30.0  # kill is the goal
+            reward += 25.0
         if not self.agent.alive:
-            reward -= 10.0
+            reward -= 8.0
 
         goal = GOAL_NAMES[self.current_goal_idx]
         dist = self.agent.distance_to(self.opponent)
         health_pct = self.agent.health / cfg.MAX_HEALTH
 
-        # ── Tactical awareness ──
+        # ── Tactical bonuses — all conditional on actual combat ──
         has_los = self._has_los()
-        # Dealt damage while opponent couldn't see us (shot through cover / from behind wall)
-        if dmg_dealt > 0 and not has_los:
-            reward += 1.5  # ambush bonus
-        # Broke line of sight while retreating (successful disengagement)
-        if not has_los and goal in ("retreat", "dash_away", "flank_target", "find_vantage_point"):
-            if dmg_taken < dmg_dealt or dmg_taken == 0:
-                reward += 0.8  # used cover effectively
 
-        # ── Anti-passivity: STRONG penalty for not engaging ──
+        # Ambush: dealt damage while opponent couldn't see us (only if dmg > 0)
+        if dmg_dealt > 0 and not has_los:
+            reward += 2.5
+
+        # Successful disengagement: ONLY if you actually took damage recently
+        # (so we know you're under pressure and need to hide)
+        if not has_los and goal in ("retreat", "dash_away") and dmg_taken > 0:
+            reward += 1.0
+
+        # Moved toward cover when hurt — requires hurt state
+        if health_pct < 0.35 and goal in ("flank_target", "retreat", "find_vantage_point"):
+            reward += 0.3
+
+        # ── STRONG anti-passivity ──
+        # If you didn't engage and opponent is alive, you're wasting time
         if dmg_dealt == 0 and self.opponent.alive:
-            reward -= 1.0
+            reward -= 0.8
             if dist > 150:
                 reward -= 0.5
 
-        # No reward for dash_away spam — must be justified by actual HP loss
-        if goal in ("dash_away", "retreat") and health_pct > 0.35:
-            reward -= 2.0
+        # No free reward for picking "tactical" goals while not engaging
+        # Passive loop detection: if you keep picking the same goal and dealing no damage
+        if dmg_dealt == 0 and goal in ("flank_target", "find_vantage_point"):
+            reward -= 0.5  # can't just spam tactical goals
+
+        # Retreating when healthy costs
+        if goal in ("dash_away", "retreat") and health_pct > 0.5:
+            reward -= 1.0
 
         # ── Role-specific rewards ──
         if self.npc_type == "zombie":
-            # ZOMBIE: MUST close distance and deal melee damage
+            # ZOMBIE: melee-focused with tactical flanking
             if goal in ("chase_target", "melee_attack", "dash_attack"):
                 if dist < 50:
-                    reward += 0.3  # in melee range
+                    reward += 0.5
                 elif dist < 100:
-                    reward += 0.1
-                else:
-                    reward -= 0.3
-                if dmg_dealt > 0:
-                    reward += 1.0  # bonus for landing hits
-
-            elif goal == "flank_target":
-                if dist < 80:
                     reward += 0.2
                 else:
-                    reward -= 0.3
+                    reward -= 0.2
+                if dmg_dealt > 0:
+                    reward += 1.5
+
+            elif goal == "flank_target":
+                # Only rewarded if it leads to damage or you're actually under threat
+                if dmg_dealt > 0:
+                    reward += 0.8  # flank that landed hits = great
+                elif dist < 60 and dmg_taken == 0:
+                    reward += 0.2  # repositioning at close range
+                else:
+                    reward -= 0.3  # otherwise passive
 
             elif goal in ("retreat", "dash_away"):
                 if health_pct < 0.2:
-                    reward += 1.5   # critical HP, smart retreat
-                elif health_pct < 0.35:
-                    reward += 0.3
-                # above 35% already handled by global penalty
+                    reward += 2.0
+                elif health_pct < 0.4 and dmg_taken > 0:
+                    reward += 0.5
 
             elif goal in ("ranged_attack", "kite_target", "maintain_distance"):
-                reward -= 1.5  # wrong role — hard penalty
+                reward -= 1.2  # wrong role
 
             elif goal == "heal":
-                if health_pct > 0.4:
-                    reward -= 2.0  # don't heal when ok
-                elif health_pct < 0.2:
-                    reward += 0.3
+                if health_pct < 0.3:
+                    reward += 0.5
+                elif health_pct > 0.5:
+                    reward -= 1.0
 
             elif goal == "find_vantage_point":
-                reward -= 1.0  # zombies don't need vantage points
+                reward -= 0.5
 
             elif goal == "idle":
-                reward -= 2.0  # never idle
+                reward -= 1.0
 
         elif self.npc_type == "skeleton":
             # SKELETON: keep range AND deal damage
             if goal in ("ranged_attack", "kite_target"):
                 if 60 < dist < 220:
-                    reward += 0.3  # good range
+                    reward += 0.5
                 elif dist < 40:
-                    reward -= 0.6
+                    reward -= 0.4
                 if dmg_dealt > 0:
-                    reward += 1.0
+                    reward += 1.5
 
             elif goal == "maintain_distance":
                 if 60 < dist < 220:
-                    reward += 0.1
-                if dmg_dealt == 0:
-                    reward -= 0.5  # must still engage
+                    reward += 0.2
 
             elif goal == "find_vantage_point":
-                if dist < 40 or dist > 250:
-                    reward += 0.1  # ok when out of range
+                if dmg_dealt > 0:
+                    reward += 0.8  # rewarded for hits from vantage
+                elif dist < 40:
+                    reward += 0.3  # repositioning when too close
                 else:
-                    reward -= 0.8  # wasting time at good range
+                    reward -= 0.3  # otherwise passive
+
+            elif goal == "flank_target":
+                if dmg_dealt > 0:
+                    reward += 0.5
+                else:
+                    reward -= 0.3
 
             elif goal in ("chase_target", "melee_attack", "dash_attack"):
                 if dist > 80:
-                    reward -= 1.5  # wrong role
+                    reward -= 0.8
                 elif dmg_dealt > 0:
-                    reward += 0.3
-
-            elif goal in ("retreat", "dash_away"):
-                if health_pct < 0.25 or dist < 30:
                     reward += 0.5
 
+            elif goal in ("retreat", "dash_away"):
+                if health_pct < 0.3 or dist < 30:
+                    reward += 0.8
+
             elif goal == "heal":
-                if health_pct > 0.4:
-                    reward -= 2.0
+                if health_pct < 0.3:
+                    reward += 0.5
+                elif health_pct > 0.5:
+                    reward -= 1.0
 
             elif goal == "idle":
-                reward -= 2.0
+                reward -= 1.0
 
         return reward
 

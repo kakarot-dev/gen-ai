@@ -1,5 +1,7 @@
 # Game Character Behavior Generation using Reinforcement Learning
 
+**Repository**: [github.com/kakarot-dev/gen-ai](https://github.com/kakarot-dev/gen-ai)
+
 A hybrid AI system that **generates** intelligent NPC combat behavior by combining
 Goal-Oriented Action Planning (GOAP) with a Proximal Policy Optimization (PPO) policy.
 Deployed as Mineflayer bots in a live Minecraft 1.21.4 server.

@@ -45,12 +45,12 @@ def main():
     except Exception:
         pass
 
-    # Each bot uses its own trained model
-    zombie_model = "models/zombie_goal/best/best_model.zip" if args.mode in ("rl", "hybrid") else None
-    skeleton_model = "models/skeleton_goal/best/best_model.zip" if args.mode in ("rl", "hybrid") else None
+    # Use the old aggressive 42-obs/76-action model (pre-tactical)
+    # This is the working baseline that actually engages combat
+    old_model = "models/zombie/best/best_model.zip" if args.mode in ("rl", "hybrid") else None
 
-    zombie = MCNPCController("zombie", "zombie", mode=args.mode, model_path=zombie_model)
-    skeleton = MCNPCController("skeleton", "skeleton", mode=args.mode, model_path=skeleton_model)
+    zombie = MCNPCController("zombie", "zombie", mode=args.mode, model_path=old_model)
+    skeleton = MCNPCController("skeleton", "skeleton", mode=args.mode, model_path=old_model)
     controllers = [zombie, skeleton]
 
     print()
