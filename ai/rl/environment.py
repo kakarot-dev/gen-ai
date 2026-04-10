@@ -1,4 +1,3 @@
-"""Gymnasium environment wrapping the game engine for RL training."""
 from __future__ import annotations
 
 import math
@@ -12,8 +11,6 @@ from simulation.entities import Character
 from simulation.actions import GameAction, ActionType, MoveDirection
 from ai.rl.opponents import RuleBasedBot
 
-
-# Goal name → index for one-hot encoding
 GOAL_NAMES = [
     "idle", "chase_target", "melee_attack", "flank_target", "dash_attack",
     "ranged_attack", "find_vantage_point", "maintain_distance", "kite_target",
@@ -22,7 +19,6 @@ GOAL_NAMES = [
 GOAL_TO_IDX = {name: i for i, name in enumerate(GOAL_NAMES)}
 NUM_GOALS = len(GOAL_NAMES)
 
-# Map discrete action to (ActionType, MoveDirection, jump)
 ACTION_MAP = []
 for jump in (False, True):
     for d in MoveDirection:
@@ -38,9 +34,8 @@ for jump in (False, True):
 
 NUM_ACTIONS = len(ACTION_MAP)
 
-
 class ArenaEnv(gym.Env):
-    """RL environment for training NPC combat behavior."""
+    
 
     metadata = {"render_modes": ["human", "rgb_array"]}
 
@@ -52,7 +47,6 @@ class ArenaEnv(gym.Env):
         self.render_mode = render_mode
         self.max_steps = max_steps
 
-        # Observation: game features (30) + goal one-hot (12) = 42
         self.obs_size = 30 + NUM_GOALS
         self.observation_space = spaces.Box(
             low=-1.0, high=1.0, shape=(self.obs_size,), dtype=np.float32
@@ -120,7 +114,6 @@ class ArenaEnv(gym.Env):
         ah = self.engine.arena.height
 
         idx = 0
-        # Agent state
         obs[idx] = (a.x / aw) * 2 - 1;               idx += 1
         obs[idx] = (a.z / ah) * 2 - 1;               idx += 1
         obs[idx] = a.vx / cfg.DASH_SPEED;             idx += 1
@@ -134,10 +127,9 @@ class ArenaEnv(gym.Env):
         obs[idx] = a.dash_cooldown / max(cfg.DASH_COOLDOWN, 1);   idx += 1
         obs[idx] = 1.0 if a.shielding else 0.0;       idx += 1
         obs[idx] = 1.0 if a.dash_timer > 0 else 0.0;  idx += 1
-        obs[idx] = a.y / 50.0;                         idx += 1  # vertical position
-        obs[idx] = 1.0 if a.on_ground else 0.0;        idx += 1  # grounded?
+        obs[idx] = a.y / 50.0;                         idx += 1
+        obs[idx] = 1.0 if a.on_ground else 0.0;        idx += 1
 
-        # Opponent state (relative)
         dx = o.x - a.x
         dz = o.z - a.z
         dist = math.hypot(dx, dz) + 1e-6
@@ -149,20 +141,17 @@ class ArenaEnv(gym.Env):
         obs[idx] = o.health / cfg.MAX_HEALTH;         idx += 1
         obs[idx] = 1.0 if o.shielding else 0.0;       idx += 1
         obs[idx] = 1.0 if o.alive else 0.0;           idx += 1
-        obs[idx] = (o.y - a.y) / 50.0;                 idx += 1  # relative height
+        obs[idx] = (o.y - a.y) / 50.0;                 idx += 1
 
-        # Facing toward opponent
         if dist > 0:
             obs[idx] = (dx * a.facing_dx + dz * a.facing_dz) / dist
         idx += 1
 
-        # Wall distances
         obs[idx] = a.x / aw;                           idx += 1
         obs[idx] = (aw - a.x) / aw;                    idx += 1
         obs[idx] = a.z / ah;                           idx += 1
         obs[idx] = (ah - a.z) / ah;                    idx += 1
 
-        # Nearest pickup
         nearest_dist = 999.0
         nearest_dx, nearest_dz = 0.0, 0.0
         for pickup in self.engine.pickups:
@@ -172,10 +161,7 @@ class ArenaEnv(gym.Env):
                     nearest_dist = pdist
                     nearest_dx = (pickup.x - a.x) / aw
                     nearest_dz = (pickup.z - a.z) / ah
-        # These are at index 30-31 but we only have 30 base features
-        # Actually we have exactly 30 features at this point
 
-        # GOAP goal one-hot
         goal_idx = GOAL_TO_IDX.get(self.current_goal, 0)
         obs[30 + goal_idx] = 1.0
 

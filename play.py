@@ -1,10 +1,3 @@
-"""Deploy AI bots in Minecraft.
-
-Usage:
-    python play.py --mode goap      # GOAP only (hand-crafted rules)
-    python play.py --mode rl        # RL only (trained model)
-    python play.py --mode hybrid    # GOAP + RL combined
-"""
 import argparse
 import time
 import sys
@@ -17,7 +10,6 @@ MODE_LABELS = {
     "hybrid": "GOAP + RL Hybrid",
 }
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", default="goap", choices=["goap", "rl", "hybrid"])
@@ -29,7 +21,6 @@ def main():
     print("=" * 50)
     print()
 
-    # Spawn bots
     print("Connecting bots...")
     try:
         result = MCGameState.spawn_bots()
@@ -38,15 +29,12 @@ def main():
         print("ERROR: Bridge not running. Run: just bridge")
         sys.exit(1)
 
-    # Tell bridge which mode we're running
     import requests
     try:
         requests.post("http://localhost:3001/mode", json={"mode": args.mode}, timeout=2)
     except Exception:
         pass
 
-    # Use the old aggressive 42-obs/76-action model (pre-tactical)
-    # This is the working baseline that actually engages combat
     old_model = "models/zombie/best/best_model.zip" if args.mode in ("rl", "hybrid") else None
 
     zombie = MCNPCController("zombie", "zombie", mode=args.mode, model_path=old_model)
@@ -119,7 +107,6 @@ def main():
             except Exception:
                 pass
         print("Done.")
-
 
 if __name__ == "__main__":
     main()

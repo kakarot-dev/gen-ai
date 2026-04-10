@@ -1,7 +1,3 @@
-/**
- * Full game setup — clean hotbar, maxed gear, arena rules.
- * Run: node setup_game.js
- */
 const mineflayer = require('mineflayer');
 
 const bot = mineflayer.createBot({
@@ -17,7 +13,6 @@ bot.once('spawn', async () => {
   console.log('Setting up game...');
   await sleep(3000);
 
-  // ── Game rules ──
   const rules = [
     '/gamerule doDaylightCycle false',
     '/gamerule doWeatherCycle false',
@@ -33,12 +28,10 @@ bot.once('spawn', async () => {
   for (const r of rules) { bot.chat(r); await sleep(80); }
   console.log('Game rules set');
 
-  // ── Player — clear and re-equip ──
   bot.chat('/clear axelbolston');
   bot.chat('/gamemode survival axelbolston');
   await sleep(500);
 
-  // Hotbar (9 slots)
   bot.chat('/give axelbolston diamond_sword[minecraft:enchantments={levels:{"minecraft:sharpness":5,"minecraft:fire_aspect":2,"minecraft:knockback":2}}] 1');
   await sleep(150);
   bot.chat('/give axelbolston bow[minecraft:enchantments={levels:{"minecraft:power":5,"minecraft:flame":1,"minecraft:infinity":1}}] 1');
@@ -58,20 +51,17 @@ bot.once('spawn', async () => {
   bot.chat('/give axelbolston cooked_beef 16');
   await sleep(150);
 
-  // Armor
   bot.chat('/give axelbolston diamond_helmet[minecraft:enchantments={levels:{"minecraft:protection":4}}] 1');
   bot.chat('/give axelbolston diamond_chestplate[minecraft:enchantments={levels:{"minecraft:protection":4}}] 1');
   bot.chat('/give axelbolston diamond_leggings[minecraft:enchantments={levels:{"minecraft:protection":4}}] 1');
   bot.chat('/give axelbolston diamond_boots[minecraft:enchantments={levels:{"minecraft:protection":4}}] 1');
   await sleep(300);
 
-  // Buffs
   bot.chat('/effect give axelbolston instant_health 1 100');
   bot.chat('/effect give axelbolston saturation 9999 1 true');
   await sleep(300);
   console.log('Player maxed out');
 
-  // ── Zombie NPC — iron melee ──
   bot.chat('/clear Zombie_NPC');
   await sleep(200);
   bot.chat('/give Zombie_NPC iron_sword[minecraft:enchantments={levels:{"minecraft:sharpness":3}}] 1');
@@ -81,7 +71,6 @@ bot.once('spawn', async () => {
   bot.chat('/effect give Zombie_NPC instant_health 1 100');
   await sleep(200);
 
-  // ── Skeleton NPC — ranged ──
   bot.chat('/clear Skeleton_NPC');
   await sleep(200);
   bot.chat('/give Skeleton_NPC bow[minecraft:enchantments={levels:{"minecraft:power":3}}] 1');
@@ -92,13 +81,11 @@ bot.once('spawn', async () => {
   await sleep(200);
   console.log('NPCs equipped');
 
-  // ── Position everyone ──
   bot.chat('/tp axelbolston 225 -59 225');
   bot.chat('/tp Zombie_NPC 212 -59 217');
   bot.chat('/tp Skeleton_NPC 238 -59 233');
   await sleep(500);
 
-  // ── Announce ──
   bot.chat('/title axelbolston title {"text":"ARENA COMBAT","color":"red","bold":true}');
   await sleep(100);
   bot.chat('/title axelbolston subtitle {"text":"GOAP+RL vs Player — FIGHT!","color":"gold"}');

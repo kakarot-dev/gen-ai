@@ -1,10 +1,3 @@
-"""Python controller for Minecraft bots via the Mineflayer HTTP bridge.
-
-Supports 3 modes:
-  - goap:   GOAP planner picks goals (hand-crafted rules)
-  - rl:     Trained RL model picks goals directly
-  - hybrid: GOAP picks strategy, RL refines goal selection
-"""
 from __future__ import annotations
 
 import math
@@ -13,16 +6,14 @@ import requests
 
 BRIDGE_URL = "http://localhost:3001"
 
-# Same goal list as RL environment
 GOAL_NAMES = [
     "idle", "chase_target", "melee_attack", "flank_target", "dash_attack",
     "ranged_attack", "find_vantage_point", "maintain_distance", "kite_target",
     "dash_away", "retreat", "heal",
 ]
 
-
 class MCBotClient:
-    """HTTP client for a single Mineflayer bot."""
+    
 
     def __init__(self, bot_id: str):
         self.bot_id = bot_id
@@ -35,9 +26,8 @@ class MCBotClient:
         resp = requests.get(f"{self.base}/state", timeout=1)
         return resp.json()
 
-
 class MCGameState:
-    """Reads full game state from the bridge."""
+    
 
     @staticmethod
     def get() -> dict:
@@ -51,15 +41,8 @@ class MCGameState:
     def reset():
         return requests.post(f"{BRIDGE_URL}/reset", timeout=5).json()
 
-
 class MCNPCController:
-    """Controls an NPC bot in Minecraft.
-
-    Modes:
-        goap:   A* planner with hand-crafted goal priorities
-        rl:     Trained PPO model picks action → mapped to goal
-        hybrid: GOAP picks goal, RL observation includes it
-    """
+    
 
     def __init__(self, bot_id: str, npc_type: str, mode: str = "goap",
                  model_path: str = None):
@@ -70,7 +53,6 @@ class MCNPCController:
         self._prev_goal = "idle"
         self._goal_frames = 0
 
-        # GOAP setup (used in goap and hybrid modes)
         if mode in ("goap", "hybrid"):
             from ai.goap.planner import GOAPPlanner
             from ai.goap.goals import get_goals_for_type
@@ -80,7 +62,6 @@ class MCNPCController:
                 get_goals_for_type(npc_type),
             )
 
-        # RL setup (used in rl and hybrid modes)
         self.rl_model = None
         if mode in ("rl", "hybrid") and model_path:
             from stable_baselines3 import PPO
@@ -88,7 +69,7 @@ class MCNPCController:
             print(f"  [{bot_id}] Loaded RL model from {model_path}")
 
     def tick(self, game_state: dict):
-        """One decision cycle."""
+        
         bot_state = game_state.get("bots", {}).get(self.bot_id)
         if not bot_state or not bot_state.get("alive", False):
             return
@@ -122,12 +103,12 @@ class MCNPCController:
         self.client.set_goal(goal)
 
     def _goap_decide(self, bot_state: dict, target: dict) -> str:
-        """GOAP-only: planner picks the goal."""
+        
         ws = self._build_world_state(bot_state, target)
         return self.planner.update(ws)
 
     def _rl_decide(self, bot_state: dict, target: dict) -> str:
-        """RL policy with learned constraints."""
+        
         if not self.rl_model:
             return "chase_target"
 
@@ -160,37 +141,26 @@ class MCNPCController:
         return goal
 
     def _hybrid_decide(self, bot_state: dict, target: dict) -> str:
-        """Hybrid: GOAP picks strategy, RL refines execution.
-
-        GOAP determines the high-level goal, then the RL model's
-        observation includes this goal. The RL model can either
-        follow the GOAP suggestion or override it based on what
-        it learned in training.
-        """
-        # GOAP suggests a goal
+        
         ws = self._build_world_state(bot_state, target)
         goap_goal = self.planner.update(ws)
 
         if not self.rl_model:
             return goap_goal
 
-        # RL sees the state and picks its own goal
         obs = self._build_goal_obs(bot_state, target)
         action, _ = self.rl_model.predict(obs, deterministic=False)
         rl_goal = GOAL_NAMES[int(action)]
 
-        # If RL strongly disagrees (different category), use RL's choice
-        # Otherwise follow GOAP
         goap_aggressive = goap_goal in ("chase_target", "melee_attack", "dash_attack", "flank_target")
         rl_aggressive = rl_goal in ("chase_target", "melee_attack", "dash_attack", "flank_target")
 
         if goap_aggressive != rl_aggressive:
-            # RL overrides GOAP — it learned something different
             return rl_goal
         return goap_goal
 
     def _action_to_goal(self, action: int, bot_state: dict, target: dict) -> str:
-        """Map an RL action index to a high-level goal name."""
+        
         from ai.rl.environment import ACTION_MAP
         from simulation.actions import ActionType
 
@@ -202,11 +172,11 @@ class MCNPCController:
 
         if action_type == ActionType.SWORD_ATTACK:
             if dist > 4:
-                return "chase_target"  # need to close distance first
+                return "chase_target"
             return "melee_attack"
         elif action_type == ActionType.BOW_ATTACK:
             if dist < 6:
-                return "kite_target"  # too close for bow, back up
+                return "kite_target"
             return "ranged_attack"
         elif action_type == ActionType.DASH:
             if health < 8:
@@ -224,12 +194,10 @@ class MCNPCController:
             td = math.hypot(tdx, tdz) + 0.1
             dot = (dx * tdx / td) + (dz * tdz / td)
             if dot > 0.2:
-                # Moving toward target
                 if dist > 4:
                     return "chase_target"
                 return "melee_attack"
             elif dot < -0.2:
-                # Moving away
                 if health < 10:
                     return "retreat"
                 return "maintain_distance"
@@ -240,69 +208,61 @@ class MCNPCController:
 
     def _build_observation(self, bot_state: dict, target: dict,
                            goap_goal: str = "idle") -> np.ndarray:
-        """Build RL observation vector from Minecraft state.
-        Same format as ai/rl/environment.py (42 floats).
-        """
+        
         obs = np.zeros(42, dtype=np.float32)
         bp = bot_state["position"]
         tp = target["position"]
 
-        # Arena dimensions (approx)
         aw, ah = 50 * 32, 50 * 32
 
         idx = 0
-        # Agent state (normalized)
         obs[idx] = (bp["x"] / 50) * 2 - 1;              idx += 1
         obs[idx] = (bp["z"] / 50) * 2 - 1;              idx += 1
-        obs[idx] = 0;                                     idx += 1  # vx (not available)
-        obs[idx] = 0;                                     idx += 1  # vz
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 0;                                     idx += 1
         obs[idx] = bot_state.get("health", 20) / 20;     idx += 1
         obs[idx] = bot_state.get("food", 20) / 20;       idx += 1
-        obs[idx] = math.sin(bot_state.get("yaw", 0));    idx += 1  # facing_dx
-        obs[idx] = math.cos(bot_state.get("yaw", 0));    idx += 1  # facing_dz
-        obs[idx] = 0;                                     idx += 1  # sword_cd
-        obs[idx] = 0;                                     idx += 1  # bow_cd
-        obs[idx] = 0;                                     idx += 1  # dash_cd
-        obs[idx] = 0;                                     idx += 1  # shielding
-        obs[idx] = 0;                                     idx += 1  # dash_timer
-        obs[idx] = (bp.get("y", -59) + 59) / 50;         idx += 1  # y position
+        obs[idx] = math.sin(bot_state.get("yaw", 0));    idx += 1
+        obs[idx] = math.cos(bot_state.get("yaw", 0));    idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = (bp.get("y", -59) + 59) / 50;         idx += 1
         obs[idx] = 1.0 if bot_state.get("onGround") else 0; idx += 1
 
-        # Opponent state (relative)
         dx = tp["x"] - bp["x"]
         dz = tp["z"] - bp["z"]
         dist = math.hypot(dx, dz) + 1e-6
         obs[idx] = dx / 50;                               idx += 1
         obs[idx] = dz / 50;                               idx += 1
         obs[idx] = min(dist / 30, 1.0);                   idx += 1
-        obs[idx] = 0;                                     idx += 1  # target vx
-        obs[idx] = 0;                                     idx += 1  # target vz
-        obs[idx] = 1.0;                                   idx += 1  # target health (unknown)
-        obs[idx] = 0;                                     idx += 1  # target shielding
-        obs[idx] = 1.0;                                   idx += 1  # target alive
-        obs[idx] = 0;                                     idx += 1  # relative height
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 1.0;                                   idx += 1
+        obs[idx] = 0;                                     idx += 1
+        obs[idx] = 1.0;                                   idx += 1
+        obs[idx] = 0;                                     idx += 1
 
-        # Facing toward opponent
         yaw = bot_state.get("yaw", 0)
         facing_dx = -math.sin(yaw)
         facing_dz = math.cos(yaw)
         obs[idx] = (dx * facing_dx + dz * facing_dz) / dist if dist > 0 else 0
         idx += 1
 
-        # Wall distances (approximate)
         obs[idx] = (bp["x"] - 200) / 50;                  idx += 1
         obs[idx] = (250 - bp["x"]) / 50;                  idx += 1
         obs[idx] = (bp["z"] - 200) / 50;                  idx += 1
         obs[idx] = (250 - bp["z"]) / 50;                  idx += 1
 
-        # GOAP goal one-hot (last 12 values)
         goal_idx = GOAL_NAMES.index(goap_goal) if goap_goal in GOAL_NAMES else 0
         obs[30 + goal_idx] = 1.0
 
         return obs
 
     def _build_goal_obs(self, bot_state: dict, target: dict) -> np.ndarray:
-        """Build observation for the goal-selection RL model (15 floats)."""
+        
         obs = np.zeros(15, dtype=np.float32)
         bp = bot_state["position"]
         tp = target["position"]
@@ -311,27 +271,27 @@ class MCNPCController:
         dist = math.hypot(dx, dz) + 1e-6
 
         mc_hp = bot_state.get("health", 20)
-        obs[0] = mc_hp / 20  # own health
-        obs[1] = bot_state.get("food", 20) / 20  # stamina
-        obs[2] = min(dist / 30, 1.0)  # distance (MC blocks, max ~30)
-        obs[3] = (dx / dist + 1) / 2  # direction x
-        obs[4] = (dz / dist + 1) / 2  # direction z
-        obs[5] = 1.0  # target health (unknown, assume full)
-        obs[6] = 1.0 if dist < 4 else 0.0  # melee range
-        obs[7] = 1.0 if 4 < dist < 25 else 0.0  # bow range
-        obs[8] = 1.0 if dist < 4 else 0.0  # too close
-        obs[9] = 1.0 if dist > 25 else 0.0  # too far
-        obs[10] = 1.0 if mc_hp < 10 else 0.0  # low health
+        obs[0] = mc_hp / 20
+        obs[1] = bot_state.get("food", 20) / 20
+        obs[2] = min(dist / 30, 1.0)
+        obs[3] = (dx / dist + 1) / 2
+        obs[4] = (dz / dist + 1) / 2
+        obs[5] = 1.0
+        obs[6] = 1.0 if dist < 4 else 0.0
+        obs[7] = 1.0 if 4 < dist < 25 else 0.0
+        obs[8] = 1.0 if dist < 4 else 0.0
+        obs[9] = 1.0 if dist > 25 else 0.0
+        obs[10] = 1.0 if mc_hp < 10 else 0.0
         prev_idx = GOAL_NAMES.index(self._prev_goal) if self._prev_goal in GOAL_NAMES else 0
-        obs[11] = prev_idx / len(GOAL_NAMES)  # previous goal
-        obs[12] = min(self._goal_frames / 30, 1.0)  # time on goal
-        obs[13] = 0.0  # dmg dealt (not tracked in MC)
-        obs[14] = 0.0  # dmg taken (not tracked in MC)
+        obs[11] = prev_idx / len(GOAL_NAMES)
+        obs[12] = min(self._goal_frames / 30, 1.0)
+        obs[13] = 0.0
+        obs[14] = 0.0
 
         return obs
 
     def _build_world_state(self, bot_state: dict, target: dict):
-        """Build GOAP WorldState from Minecraft state."""
+        
         from ai.goap.world_state import WorldState
 
         ws = WorldState()

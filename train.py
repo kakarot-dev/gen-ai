@@ -1,9 +1,3 @@
-"""Train RL agents.
-
-Usage:
-    python train.py --type goal --npc-type zombie --timesteps 500000
-    python train.py --type goal --npc-type skeleton --timesteps 500000
-"""
 import argparse
 import time
 from pathlib import Path
@@ -12,16 +6,14 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 
-
 def make_goal_env(npc_type, rank=0):
     def _init():
         from ai.rl.goal_env import GoalSelectionEnv
         return GoalSelectionEnv(npc_type=npc_type)
     return _init
 
-
 def train_goal_selection(npc_type, timesteps, n_envs, device, lr):
-    """Train a goal-selection policy — learns WHEN to pick which GOAP goal."""
+    
     save_path = Path("models") / f"{npc_type}_goal"
     save_path.mkdir(parents=True, exist_ok=True)
 
@@ -46,7 +38,7 @@ def train_goal_selection(npc_type, timesteps, n_envs, device, lr):
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.05,   # higher entropy = more exploration of different goals
+        ent_coef=0.05,
         vf_coef=0.5,
         max_grad_norm=0.5,
         verbose=0,
@@ -91,7 +83,6 @@ def train_goal_selection(npc_type, timesteps, n_envs, device, lr):
     vec_env.close()
     eval_env.close()
     return model
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train RL agents")

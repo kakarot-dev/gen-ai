@@ -1,29 +1,3 @@
-"""RL environment for training GOAP goal selection with tactical awareness.
-
-The agent observes the game state (including line-of-sight and cover info)
-and picks which GOAP goal to pursue.
-
-Observation (17 floats):
-    0  own health (0-1)
-    1  own stamina (0-1)
-    2  distance to target (0-1)
-    3  direction dx (0-1)
-    4  direction dz (0-1)
-    5  target health (0-1)
-    6  in melee range
-    7  in bow range
-    8  target too close
-    9  target too far
-    10 low health
-    11 previous goal (0-1)
-    12 time on current goal (0-1)
-    13 damage dealt last window (0-1)
-    14 damage taken last window (0-1)
-    15 line-of-sight to target (bool)
-    16 cover available nearby (bool)
-
-Action: Discrete(12) — pick one of 12 GOAP goals
-"""
 from __future__ import annotations
 
 import math
@@ -43,14 +17,8 @@ GOAL_NAMES = [
 ]
 NUM_GOALS = len(GOAL_NAMES)
 
-
 class GoalSelectionEnv(gym.Env):
-    """RL environment that trains an agent to pick GOAP goals.
-
-    Every N frames, the agent picks a goal. A rule-based executor
-    carries out the goal for N frames. Then the agent observes the
-    result and picks again.
-    """
+    
 
     metadata = {"render_modes": []}
 
@@ -59,8 +27,8 @@ class GoalSelectionEnv(gym.Env):
         super().__init__()
 
         self.npc_type = npc_type
-        self.decision_interval = decision_interval  # frames between decisions
-        self.max_decisions = max_decisions  # max decisions per episode
+        self.decision_interval = decision_interval
+        self.max_decisions = max_decisions
 
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(17,), dtype=np.float32
@@ -96,21 +64,18 @@ class GoalSelectionEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action: int):
-        """Pick a goal, execute it for N frames, return result."""
+        
         self.decision_count += 1
         self.current_goal_idx = action
         goal_name = GOAL_NAMES[action]
 
-        # Record HP before execution
         hp_before = self.agent.health
         opp_hp_before = self.opponent.health
 
-        # Execute the goal for decision_interval frames
         for _ in range(self.decision_interval):
             if self.engine.done:
                 break
 
-            # Agent acts based on goal (rule-based executor)
             agent_action = self._execute_goal(goal_name)
             opp_action = self.opponent_bot.decide(self.agent)
 
@@ -119,16 +84,13 @@ class GoalSelectionEnv(gym.Env):
                 self.opponent: opp_action,
             })
 
-        # Calculate what happened during this decision window
         dmg_dealt = max(0, opp_hp_before - self.opponent.health)
         dmg_taken = max(0, hp_before - self.agent.health)
         self._dmg_dealt_window = dmg_dealt
         self._dmg_taken_window = dmg_taken
 
-        # Reward
         reward = self._compute_reward(dmg_dealt, dmg_taken)
 
-        # Track
         self._prev_agent_hp = self.agent.health
         self._prev_opp_hp = self.opponent.health
         self._goal_time = 0
@@ -186,14 +148,12 @@ class GoalSelectionEnv(gym.Env):
         return obs
 
     def _compute_reward(self, dmg_dealt: float, dmg_taken: float) -> float:
-        """Balanced reward: rewards engagement AND tactical cover use."""
+        
         reward = 0.0
 
-        # Damage is the primary signal — boosted
-        reward += dmg_dealt * 0.8       # each HP damage = +0.8
-        reward -= dmg_taken * 0.1       # softer penalty
+        reward += dmg_dealt * 0.8
+        reward -= dmg_taken * 0.1
 
-        # Terminal rewards
         if not self.opponent.alive:
             reward += 25.0
         if not self.agent.alive:
@@ -203,41 +163,29 @@ class GoalSelectionEnv(gym.Env):
         dist = self.agent.distance_to(self.opponent)
         health_pct = self.agent.health / cfg.MAX_HEALTH
 
-        # ── Tactical bonuses — all conditional on actual combat ──
         has_los = self._has_los()
 
-        # Ambush: dealt damage while opponent couldn't see us (only if dmg > 0)
         if dmg_dealt > 0 and not has_los:
             reward += 2.5
 
-        # Successful disengagement: ONLY if you actually took damage recently
-        # (so we know you're under pressure and need to hide)
         if not has_los and goal in ("retreat", "dash_away") and dmg_taken > 0:
             reward += 1.0
 
-        # Moved toward cover when hurt — requires hurt state
         if health_pct < 0.35 and goal in ("flank_target", "retreat", "find_vantage_point"):
             reward += 0.3
 
-        # ── STRONG anti-passivity ──
-        # If you didn't engage and opponent is alive, you're wasting time
         if dmg_dealt == 0 and self.opponent.alive:
             reward -= 0.8
             if dist > 150:
                 reward -= 0.5
 
-        # No free reward for picking "tactical" goals while not engaging
-        # Passive loop detection: if you keep picking the same goal and dealing no damage
         if dmg_dealt == 0 and goal in ("flank_target", "find_vantage_point"):
             reward -= 0.5  # can't just spam tactical goals
 
-        # Retreating when healthy costs
         if goal in ("dash_away", "retreat") and health_pct > 0.5:
             reward -= 1.0
 
-        # ── Role-specific rewards ──
         if self.npc_type == "zombie":
-            # ZOMBIE: melee-focused with tactical flanking
             if goal in ("chase_target", "melee_attack", "dash_attack"):
                 if dist < 50:
                     reward += 0.5
@@ -249,13 +197,12 @@ class GoalSelectionEnv(gym.Env):
                     reward += 1.5
 
             elif goal == "flank_target":
-                # Only rewarded if it leads to damage or you're actually under threat
                 if dmg_dealt > 0:
-                    reward += 0.8  # flank that landed hits = great
+                    reward += 0.8
                 elif dist < 60 and dmg_taken == 0:
-                    reward += 0.2  # repositioning at close range
+                    reward += 0.2
                 else:
-                    reward -= 0.3  # otherwise passive
+                    reward -= 0.3
 
             elif goal in ("retreat", "dash_away"):
                 if health_pct < 0.2:
@@ -264,7 +211,7 @@ class GoalSelectionEnv(gym.Env):
                     reward += 0.5
 
             elif goal in ("ranged_attack", "kite_target", "maintain_distance"):
-                reward -= 1.2  # wrong role
+                reward -= 1.2
 
             elif goal == "heal":
                 if health_pct < 0.3:
@@ -279,7 +226,6 @@ class GoalSelectionEnv(gym.Env):
                 reward -= 1.0
 
         elif self.npc_type == "skeleton":
-            # SKELETON: keep range AND deal damage
             if goal in ("ranged_attack", "kite_target"):
                 if 60 < dist < 220:
                     reward += 0.5
@@ -294,11 +240,11 @@ class GoalSelectionEnv(gym.Env):
 
             elif goal == "find_vantage_point":
                 if dmg_dealt > 0:
-                    reward += 0.8  # rewarded for hits from vantage
+                    reward += 0.8
                 elif dist < 40:
-                    reward += 0.3  # repositioning when too close
+                    reward += 0.3
                 else:
-                    reward -= 0.3  # otherwise passive
+                    reward -= 0.3
 
             elif goal == "flank_target":
                 if dmg_dealt > 0:
@@ -328,14 +274,13 @@ class GoalSelectionEnv(gym.Env):
         return reward
 
     def _execute_goal(self, goal_name: str) -> GameAction:
-        """Rule-based execution of a goal (same as npc_controller)."""
+        
         a = self.agent
         o = self.opponent
         dx = o.x - a.x
         dz = o.z - a.z
         dist = math.hypot(dx, dz)
 
-        # Direction toward target
         angle = math.atan2(dz, dx)
         deg = math.degrees(angle) % 360
         if deg < 22.5 or deg >= 337.5:
@@ -355,7 +300,6 @@ class GoalSelectionEnv(gym.Env):
         else:
             toward = MoveDirection.UP_RIGHT
 
-        # Away
         away_angle = math.atan2(-dz, -dx)
         adeg = math.degrees(away_angle) % 360
         if adeg < 22.5 or adeg >= 337.5:
@@ -386,13 +330,11 @@ class GoalSelectionEnv(gym.Env):
                 return GameAction(ActionType.DASH, toward)
             return GameAction(ActionType.MOVE, toward)
         elif goal_name == "flank_target":
-            # Try to move to a cover point that breaks LoS first
             cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
             if cover is not None:
                 cdx = cover[0] - a.x
                 cdz = cover[1] - a.z
                 return GameAction(ActionType.MOVE, self._dir_from_vec(cdx, cdz))
-            # Fallback: perpendicular
             perp_angle = math.atan2(dx, -dz)
             pdeg = math.degrees(perp_angle) % 360
             if pdeg < 45 or pdeg >= 315: perp = MoveDirection.RIGHT
@@ -411,7 +353,6 @@ class GoalSelectionEnv(gym.Env):
                 return GameAction(ActionType.MOVE, toward)
             return GameAction(ActionType.BOW_ATTACK, toward) if a.can_bow() else GameAction(ActionType.MOVE, toward)
         elif goal_name in ("retreat", "dash_away"):
-            # Retreat toward cover if available
             cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
             if cover is not None:
                 cdx = cover[0] - a.x
@@ -423,7 +364,6 @@ class GoalSelectionEnv(gym.Env):
                 return GameAction(ActionType.DASH, retreat_dir)
             return GameAction(ActionType.MOVE, retreat_dir)
         elif goal_name == "heal":
-            # Move toward cover while healing
             cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
             if cover is not None:
                 cdx = cover[0] - a.x
@@ -431,7 +371,6 @@ class GoalSelectionEnv(gym.Env):
                 return GameAction(ActionType.MOVE, self._dir_from_vec(cdx, cdz))
             return GameAction(ActionType.MOVE, away)
         elif goal_name == "find_vantage_point":
-            # Move to a cover point with good firing angle
             cover = self.engine.arena.nearest_cover(a.x, a.z, o.x, o.z)
             if cover is not None:
                 cdx = cover[0] - a.x
@@ -442,7 +381,7 @@ class GoalSelectionEnv(gym.Env):
             return GameAction(ActionType.NOOP, MoveDirection.NONE)
 
     def _dir_from_vec(self, dx: float, dz: float) -> MoveDirection:
-        """Convert a (dx, dz) vector to the closest MoveDirection."""
+        
         if abs(dx) < 0.1 and abs(dz) < 0.1:
             return MoveDirection.NONE
         angle = math.atan2(dz, dx)

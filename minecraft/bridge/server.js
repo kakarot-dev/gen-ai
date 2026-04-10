@@ -1,17 +1,3 @@
-/**
- * Mineflayer Bridge v2 — Smart bots with native combat.
- *
- * Python sends high-level GOAP goals, JS handles execution natively.
- * Combat uses mineflayer-pvp for proper attack timing and movement.
- *
- * Endpoints:
- *   POST /bots/spawn          — Connect bots to server
- *   POST /bots/:id/goal       — Set GOAP goal (chase, attack, retreat, etc)
- *   GET  /bots/:id/state      — Bot state
- *   GET  /state               — Full game state
- *   POST /reset               — Reset bots
- */
-
 const express = require('express');
 const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
@@ -24,41 +10,30 @@ const PORT = 3001;
 const MC_HOST = process.env.MC_HOST || 'localhost';
 const MC_PORT = parseInt(process.env.MC_PORT || '25565');
 
-// Arena bounds
 const ARENA = { minX: 202, maxX: 248, minZ: 202, maxZ: 248, y: -59 };
 
-// Cover points — corners/interiors of the 4 buildings in the arena
-// (OX=200, OZ=200 offset, so building coords + 200)
 const COVER_POINTS = [
-  // NW Bunker interior (stone bricks 203-210, 203-210)
   { x: 205, z: 206, name: 'bunker' },
   { x: 208, z: 208, name: 'bunker' },
-  // SE Warehouse interior (238-247, 238-247)
   { x: 241, z: 241, name: 'warehouse' },
   { x: 244, z: 244, name: 'warehouse' },
-  // NE Sniper Tower interior (240-245, 203-208)
   { x: 242, z: 205, name: 'tower' },
-  // SW Garage interior (203-212, 240-247)
   { x: 206, z: 243, name: 'garage' },
   { x: 209, z: 245, name: 'garage' },
-  // Behind half walls
   { x: 216, z: 214, name: 'wall_nw' },
   { x: 232, z: 214, name: 'wall_ne' },
   { x: 216, z: 235, name: 'wall_sw' },
   { x: 232, z: 235, name: 'wall_se' },
-  // Behind crates
   { x: 221, z: 221, name: 'crate_nw' },
   { x: 229, z: 221, name: 'crate_ne' },
 ];
 
-// Find best cover point — furthest from player, closest to bot
 function findCover(botPos, playerPos) {
   let best = null;
   let bestScore = -Infinity;
   for (const cp of COVER_POINTS) {
     const distFromPlayer = Math.sqrt((cp.x - playerPos.x)**2 + (cp.z - playerPos.z)**2);
     const distFromBot = Math.sqrt((cp.x - botPos.x)**2 + (cp.z - botPos.z)**2);
-    // Score: far from player but reachable by bot
     const score = distFromPlayer - distFromBot * 0.5;
     if (score > bestScore) {
       bestScore = score;
@@ -89,14 +64,12 @@ function distTo(bot, entity) {
   return bot.entity.position.distanceTo(entity.position);
 }
 
-// ── HUD update — show mode + both bots' status on actionbar ──
 let hudInterval = null;
 function startHUD() {
   if (hudInterval) return;
   hudInterval = setInterval(() => {
     const parts = [];
 
-    // Show mode
     const modeColor = currentMode === 'GOAP' ? 'gold' :
                       currentMode === 'RL' ? 'light_purple' : 'aqua';
     parts.push(
@@ -105,7 +78,6 @@ function startHUD() {
       { text: '] ', color: 'dark_gray' },
     );
 
-    // Show each bot's goal + HP
     for (const [id, entry] of Object.entries(bots)) {
       const display = GOAL_DISPLAY[entry.currentGoal] || { text: entry.currentGoal, color: 'white' };
       const hp = Math.round(entry.bot.health || 0);
@@ -117,7 +89,7 @@ function startHUD() {
         { text: '(' + hp + 'hp) ', color: hpColor },
       );
     }
-    if (parts.length <= 3) return; // only mode label, no bots
+    if (parts.length <= 3) return;
 
     for (const entry of Object.values(bots)) {
       if (entry.bot.health > 0) {
@@ -128,15 +100,12 @@ function startHUD() {
   }, 500);
 }
 
-// ── Bot behavior loop — runs natively in JS at full tick rate ──
 function runBehavior(entry) {
   const { bot, config } = entry;
   startHUD();
 
-  // Prevent duplicate intervals
   if (entry.behaviorInterval) clearInterval(entry.behaviorInterval);
 
-  // Limit attack reach and add cooldown (feel like a real player)
   const MELEE_REACH = 2.8;
   const BOW_REACH = 25;
   let lastAttackTime = 0;
@@ -161,13 +130,11 @@ function runBehavior(entry) {
     const dist = distTo(bot, target.entity);
     const goal = entry.currentGoal || 'idle';
 
-    // Always look at target
     bot.lookAt(target.entity.position.offset(0, 1.6, 0));
 
     switch (goal) {
       case 'chase_target':
       case 'dash_attack':
-        // Sprint toward player
         if (dist > MELEE_REACH) {
           bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, 2), true);
           bot.setControlState('sprint', true);
@@ -186,7 +153,6 @@ function runBehavior(entry) {
         break;
 
       case 'flank_target': {
-        // Move to cover point that breaks LoS, then approach from there
         const cover = findCover(bot.entity.position, target.entity.position);
         bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 1), true);
         bot.setControlState('sprint', true);
@@ -195,7 +161,6 @@ function runBehavior(entry) {
       }
 
       case 'ranged_attack':
-        // Keep distance, attack
         if (dist < 6) {
           const coverR = findCover(bot.entity.position, target.entity.position);
           bot.pathfinder.setGoal(new goals.GoalNear(coverR.x, ARENA.y, coverR.z, 1), true);
@@ -206,11 +171,9 @@ function runBehavior(entry) {
         break;
 
       case 'find_vantage_point': {
-        // Go to a cover point that gives a good firing angle
         const cover = findCover(bot.entity.position, target.entity.position);
         bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 2), true);
         bot.setControlState('sprint', true);
-        // Shoot while repositioning
         if (dist < 25 && canAttack()) bot.attack(target.entity);
         break;
       }
@@ -218,16 +181,13 @@ function runBehavior(entry) {
       case 'maintain_distance':
       case 'kite_target':
       case 'control_space': {
-        // Duck behind cover when too close, otherwise strafe-shoot
         if (dist < 8) {
-          // Too close — retreat to cover
           const cover = findCover(bot.entity.position, target.entity.position);
           bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 1), true);
           bot.setControlState('sprint', true);
         } else if (dist > 22) {
           bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, 10), true);
         } else {
-          // Good range — strafe and shoot
           bot.setControlState('left', true);
           setTimeout(() => {
             bot.setControlState('left', false);
@@ -235,7 +195,6 @@ function runBehavior(entry) {
             setTimeout(() => bot.setControlState('right', false), 400);
           }, 400);
         }
-        // Always attack
         if (canAttack()) bot.attack(target.entity);
         break;
       }
@@ -243,21 +202,21 @@ function runBehavior(entry) {
       case 'retreat':
       case 'dash_away': {
         bot.pvp.stop();
-        // Find nearest cover point away from player
         const cover = findCover(bot.entity.position, target.entity.position);
-        console.log(`[${config.id}] Retreating to ${cover.name} (${cover.x}, ${cover.z})`);
         bot.pathfinder.setGoal(new goals.GoalNear(cover.x, ARENA.y, cover.z, 1), true);
         bot.setControlState('sprint', true);
         if (Math.random() < 0.15) {
           bot.setControlState('jump', true);
           setTimeout(() => bot.setControlState('jump', false), 200);
         }
+        if (bot.health < 14 && bot.health > 0) {
+          bot.chat('/effect give ' + config.username + ' minecraft:regeneration 2 0');
+        }
         break;
       }
 
       case 'heal': {
         bot.pvp.stop();
-        // Also retreat to cover when healing
         const healCover = findCover(bot.entity.position, target.entity.position);
         console.log(`[${config.id}] Healing at ${healCover.name} (${healCover.x}, ${healCover.z})`);
         bot.pathfinder.setGoal(new goals.GoalNear(healCover.x, ARENA.y, healCover.z, 1), true);
@@ -265,13 +224,13 @@ function runBehavior(entry) {
         break;
       }
 
-      default: // idle — do nothing until Python sends a goal
+      default:
         bot.clearControlStates();
         bot.pvp.stop();
         bot.pathfinder.stop();
         break;
     }
-  }, 250); // 4 ticks per second for goal execution
+  }, 250);
 }
 
 function createBot(config) {
@@ -303,7 +262,6 @@ function createBot(config) {
       };
       bots[config.id] = entry;
 
-      // Start native behavior loop
       runBehavior(entry);
 
       resolve(bot);
@@ -317,19 +275,16 @@ function createBot(config) {
     bot.on('death', () => {
       console.log(`[${config.id}] Died — will re-equip on respawn`);
     });
-    // Re-equip after respawn
     bot.on('spawn', () => {
-      if (!bots[config.id]) return; // first spawn handled above
+      if (!bots[config.id]) return;
       console.log(`[${config.id}] Respawned — re-equipping`);
       setTimeout(() => {
-        // Give weapons back via chat commands
         if (config.role === 'melee') {
           bot.chat('/give ' + config.username + ' iron_sword');
         } else {
           bot.chat('/give ' + config.username + ' bow');
           bot.chat('/give ' + config.username + ' arrow 64');
         }
-        // TP to safe arena spot (away from lava center)
         const rx = config.role === 'melee' ? 212 : 238;
         const rz = config.role === 'melee' ? 217 : 233;
         bot.chat('/tp ' + config.username + ' ' + rx + ' -59 ' + rz);
@@ -338,8 +293,6 @@ function createBot(config) {
     });
   });
 }
-
-// ── API Endpoints ──
 
 app.post('/bots/spawn', async (req, res) => {
   try {
@@ -355,7 +308,6 @@ app.post('/bots/spawn', async (req, res) => {
   }
 });
 
-// Goal display names and colors for the Minecraft toast
 const GOAL_DISPLAY = {
   chase_target:      { text: 'CHASING',           color: 'red' },
   melee_attack:      { text: 'ATTACKING',         color: 'dark_red' },
@@ -372,7 +324,6 @@ const GOAL_DISPLAY = {
   idle:              { text: 'IDLE',               color: 'gray' },
 };
 
-// Track current AI mode (set by Python)
 let currentMode = 'GOAP';
 
 app.post('/mode', (req, res) => {
@@ -381,7 +332,6 @@ app.post('/mode', (req, res) => {
   res.json({ status: 'ok', mode: currentMode });
 });
 
-// Python sends goal — JS executes it natively
 app.post('/bots/:id/goal', (req, res) => {
   const entry = bots[req.params.id];
   if (!entry) return res.status(404).json({ error: 'Bot not found' });
@@ -459,7 +409,7 @@ app.post('/reset', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Bridge v2 running on http://localhost:${PORT}`);
+  console.log(`Bridge v2 running on http:
   console.log(`MC server: ${MC_HOST}:${MC_PORT}`);
   console.log('');
   console.log('Python sends GOAP goals → JS executes combat natively');

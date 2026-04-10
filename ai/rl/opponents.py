@@ -1,4 +1,3 @@
-"""Rule-based bot opponents for training and testing."""
 from __future__ import annotations
 
 import math
@@ -7,9 +6,8 @@ import random
 from simulation.actions import GameAction, ActionType, MoveDirection, DIRECTION_VECTORS
 from simulation.entities import Character
 
-
 def _angle_to_direction(dx: float, dz: float) -> MoveDirection:
-    """Convert a (dx, dz) vector to the closest MoveDirection."""
+    
     if dx == 0 and dz == 0:
         return MoveDirection.NONE
 
@@ -32,9 +30,8 @@ def _angle_to_direction(dx: float, dz: float) -> MoveDirection:
     else:
         return MoveDirection.UP_RIGHT
 
-
 class RuleBasedBot:
-    """Simple rule-based NPC for testing and as RL training opponent."""
+    
 
     def __init__(self, npc: Character):
         self.npc = npc
@@ -48,10 +45,8 @@ class RuleBasedBot:
         dist = math.hypot(dx, dz)
         direction = _angle_to_direction(dx, dz)
 
-        # Occasionally jump
         should_jump = random.random() < 0.02
 
-        # Retreat if low health
         if self.npc.health < 25 and dist < 100:
             away = _angle_to_direction(-dx, -dz)
             if self.npc.can_dash() and random.random() < 0.3:

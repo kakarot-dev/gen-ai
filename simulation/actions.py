@@ -1,6 +1,4 @@
-"""Action definitions for the game."""
 from enum import IntEnum
-
 
 class MoveDirection(IntEnum):
     NONE = 0
@@ -13,8 +11,6 @@ class MoveDirection(IntEnum):
     DOWN_LEFT = 7
     DOWN_RIGHT = 8
 
-
-# Direction vectors (dx, dy) — y increases downward
 DIRECTION_VECTORS = {
     MoveDirection.NONE: (0, 0),
     MoveDirection.UP: (0, -1),
@@ -27,7 +23,6 @@ DIRECTION_VECTORS = {
     MoveDirection.DOWN_RIGHT: (0.707, 0.707),
 }
 
-
 class ActionType(IntEnum):
     NOOP = 0
     MOVE = 1
@@ -37,9 +32,8 @@ class ActionType(IntEnum):
     SHIELD = 5
     JUMP = 6
 
-
 class GameAction:
-    """Represents a single action taken by a character in one frame."""
+    
 
     __slots__ = ("action_type", "direction", "jump")
 
@@ -48,7 +42,7 @@ class GameAction:
                  jump: bool = False):
         self.action_type = action_type
         self.direction = direction
-        self.jump = jump  # can jump simultaneously with other actions
+        self.jump = jump
 
     def __repr__(self):
         return f"GameAction({self.action_type.name}, {self.direction.name})"

@@ -1,4 +1,3 @@
-"""Core game engine — pure game state logic, no rendering."""
 from __future__ import annotations
 
 import math
@@ -8,12 +7,8 @@ from simulation.arena import Arena
 from simulation.entities import Character, Projectile, Pickup
 from simulation.actions import GameAction, ActionType
 
-
 class GameEngine:
-    """Manages game state and processes one tick at a time.
-
-    Coordinates: x,z = horizontal plane, y = vertical (jump).
-    """
+    
 
     def __init__(self, num_npcs: int = 1):
         self.arena = Arena()
@@ -61,29 +56,24 @@ class GameEngine:
 
         self.frame += 1
 
-        # 1. Apply actions and collect new projectiles
         for char, action in actions.items():
             proj = char.apply_action(action)
             if proj is not None:
                 self.projectiles.append(proj)
 
-        # 2. Move characters (horizontal) and resolve wall collisions
         for char in self.all_characters:
             if not char.alive:
                 continue
             self._move_character(char)
 
-        # 3. Jump / gravity physics
         for char in self.all_characters:
             if char.alive:
                 char.tick_physics()
 
-        # 4. Process sword attacks (melee hit detection)
         for char, action in actions.items():
             if action.action_type == ActionType.SWORD_ATTACK and char.sword_cooldown == cfg.SWORD_COOLDOWN:
                 self._process_sword_hit(char)
 
-        # 5. Update projectiles
         for proj in self.projectiles:
             if not proj.alive:
                 continue
@@ -91,7 +81,6 @@ class GameEngine:
             self._check_projectile_collisions(proj)
         self.projectiles = [p for p in self.projectiles if p.alive]
 
-        # 6. Lava damage
         for char in self.all_characters:
             if not char.alive:
                 continue
@@ -99,7 +88,6 @@ class GameEngine:
             if self.arena.is_lava(col, row) and self.frame % cfg.LAVA_TICK_RATE == 0:
                 char.take_damage(cfg.LAVA_DAMAGE)
 
-        # 7. Pickup collection
         for char in self.all_characters:
             if not char.alive:
                 continue
@@ -110,15 +98,12 @@ class GameEngine:
                 if dist < char.radius + pickup.radius:
                     pickup.collect(char)
 
-        # 8. Update pickups (respawn timers)
         for pickup in self.pickups:
             pickup.update()
 
-        # 9. Tick cooldowns
         for char in self.all_characters:
             char.tick_cooldowns()
 
-        # 10. Check win condition
         self._check_win_condition()
 
     def _move_character(self, char: Character):
@@ -149,7 +134,6 @@ class GameEngine:
             if dist > cfg.SWORD_RANGE + target.radius:
                 continue
 
-            # Check vertical proximity (can't sword someone far above/below)
             dy = abs(target.y - attacker.y)
             if dy > 20:
                 continue
@@ -182,7 +166,7 @@ class GameEngine:
             self.winner = alive_chars[0] if alive_chars else None
 
     def get_state_snapshot(self) -> dict:
-        """Return a snapshot of the current game state."""
+        
         return {
             "frame": self.frame,
             "done": self.done,

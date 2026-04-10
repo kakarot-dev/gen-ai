@@ -1,20 +1,10 @@
-"""GOAP action definitions — preconditions and effects."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 @dataclass
 class GOAPAction:
-    """A high-level action the NPC can plan to take.
-
-    The GOAP planner chains these together using A* to satisfy goals.
-    Each action has:
-        - preconditions: world state facts that must be true to use this action
-        - effects: world state changes when this action completes
-        - cost: used by A* to prefer cheaper plans
-        - name: identifier passed to RL policy as the current goal
-    """
+    
     name: str
     preconditions: dict[str, bool | float] = field(default_factory=dict)
     effects: dict[str, bool | float] = field(default_factory=dict)
@@ -22,11 +12,6 @@ class GOAPAction:
 
     def is_usable(self, world_state) -> bool:
         return world_state.matches(self.preconditions)
-
-
-# ============================================================
-# ZOMBIE (melee) actions
-# ============================================================
 
 ZOMBIE_ACTIONS = [
     GOAPAction(
@@ -68,11 +53,6 @@ ZOMBIE_ACTIONS = [
         cost=2.0,
     ),
 ]
-
-
-# ============================================================
-# SKELETON (ranged) actions
-# ============================================================
 
 SKELETON_ACTIONS = [
     GOAPAction(
@@ -122,11 +102,10 @@ SKELETON_ACTIONS = [
     ),
 ]
 
-
 def get_actions_for_type(char_type: str) -> list[GOAPAction]:
     if char_type == "zombie":
         return ZOMBIE_ACTIONS
     elif char_type == "skeleton":
         return SKELETON_ACTIONS
     else:
-        return ZOMBIE_ACTIONS  # fallback
+        return ZOMBIE_ACTIONS

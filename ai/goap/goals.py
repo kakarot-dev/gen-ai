@@ -1,13 +1,7 @@
-"""GOAP goal definitions with dynamic priority.
-
-Priorities determine which goal the NPC pursues. Higher = more urgent.
-The planner picks the highest unsatisfied goal and finds actions to achieve it.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from ai.goap.world_state import WorldState
-
 
 @dataclass
 class GOAPGoal:
@@ -21,9 +15,8 @@ class GOAPGoal:
     def is_satisfied(self, world_state: WorldState) -> bool:
         return world_state.matches(self.desired_state)
 
-
 class KillTargetGoal(GOAPGoal):
-    """Aggressive — chase and kill the player."""
+    
     def __init__(self):
         super().__init__(
             name="kill_target",
@@ -37,16 +30,15 @@ class KillTargetGoal(GOAPGoal):
         p = self.base_priority
         health_pct = ws.get("health", 100) / 100
         if health_pct > 0.6:
-            p += 3.0   # very aggressive when healthy
+            p += 3.0
         elif health_pct > 0.3:
-            p += 1.0   # still want to fight
+            p += 1.0
         else:
-            p -= 2.0   # back off when hurt
+            p -= 2.0
         return p
 
-
 class SurviveGoal(GOAPGoal):
-    """Defensive — retreat to safety when hurt."""
+    
     def __init__(self):
         super().__init__(
             name="survive",
@@ -58,16 +50,15 @@ class SurviveGoal(GOAPGoal):
         health_pct = ws.get("health", 100) / 100
         p = self.base_priority
         if health_pct < 0.25:
-            p += 10.0   # CRITICAL — run away NOW
+            p += 10.0
         elif health_pct < 0.5:
-            p += 6.0    # hurt — prioritize safety
+            p += 6.0
         if ws.get("target_too_close") and health_pct < 0.5:
             p += 3.0    # enemy is close AND we're hurt
         return p
 
-
 class HealGoal(GOAPGoal):
-    """Seek healing when hurt."""
+    
     def __init__(self):
         super().__init__(
             name="heal",
@@ -86,9 +77,8 @@ class HealGoal(GOAPGoal):
             p += 4.0
         return p
 
-
 class ControlSpaceGoal(GOAPGoal):
-    """For ranged NPCs — maintain optimal distance."""
+    
     def __init__(self):
         super().__init__(
             name="control_space",
@@ -99,14 +89,13 @@ class ControlSpaceGoal(GOAPGoal):
     def get_priority(self, ws: WorldState) -> float:
         p = self.base_priority
         if ws.get("target_too_close"):
-            p += 5.0    # urgent — need space to shoot
+            p += 5.0
         if not ws.get("in_bow_range"):
-            p += 2.0    # need to reposition
+            p += 2.0
         health_pct = ws.get("health", 100) / 100
         if health_pct < 0.4:
-            p += 3.0    # keep distance when hurt
+            p += 3.0
         return p
-
 
 def get_goals_for_type(char_type: str) -> list[GOAPGoal]:
     if char_type == "zombie":

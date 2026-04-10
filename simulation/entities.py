@@ -1,4 +1,3 @@
-"""Game entities: Characters, Projectiles, Pickups."""
 from __future__ import annotations
 
 import math
@@ -6,54 +5,40 @@ import math
 import config as cfg
 from simulation.actions import ActionType, MoveDirection, DIRECTION_VECTORS, GameAction
 
-
 class Character:
-    """A game character — player or NPC.
-
-    Coordinate system (maps to 3D):
-        x, z  = horizontal plane (movement)
-        y     = vertical axis (jump/gravity, 0 = ground)
-    The 2D arena logic uses (x, z). y is purely for jump physics.
-    """
+    
 
     def __init__(self, x: float, z: float, char_type: str = "player"):
-        # Position & movement on the horizontal plane
         self.x = x
         self.z = z
         self.vx = 0.0
         self.vz = 0.0
         self.facing_dx = 0.0
-        self.facing_dz = 1.0  # default facing
+        self.facing_dz = 1.0
 
-        # Vertical axis (jump)
         self.y = cfg.GROUND_Y
         self.vy = 0.0
         self.on_ground = True
 
         self.char_type = char_type  # "player", "zombie", "skeleton"
 
-        # Stats
         self.health = cfg.MAX_HEALTH
         self.stamina = cfg.MAX_STAMINA
         self.alive = True
         self.speed = cfg.PLAYER_SPEED if char_type == "player" else cfg.NPC_SPEED
 
-        # Cooldowns (count down to 0)
         self.sword_cooldown = 0
         self.bow_cooldown = 0
         self.dash_cooldown = 0
-        self.dash_timer = 0  # frames remaining in dash
+        self.dash_timer = 0
 
-        # Shield state
         self.shielding = False
 
-        # Combat stats for tracking
         self.damage_dealt = 0
         self.damage_taken = 0
         self.kills = 0
         self.deaths = 0
 
-        # Hit flash (for rendering)
         self.hit_flash = 0
 
     @property
@@ -100,20 +85,18 @@ class Character:
                 and self.stamina >= cfg.JUMP_STAMINA_COST)
 
     def apply_action(self, action: GameAction) -> Projectile | None:
-        """Apply an action and return a projectile if one was created."""
+        
         if not self.alive:
             return None
 
         projectile = None
         self.shielding = False
 
-        # Update facing direction from action direction
         dx, dz = DIRECTION_VECTORS[action.direction]
         if dx != 0 or dz != 0:
             self.facing_dx = dx
             self.facing_dz = dz
 
-        # Handle jump (can combine with any action)
         if action.jump and self.can_jump():
             self.vy = cfg.JUMP_FORCE
             self.on_ground = False
@@ -142,10 +125,10 @@ class Character:
                 self.bow_cooldown = cfg.BOW_COOLDOWN
                 projectile = Projectile(
                     self.x + self.facing_dx * self.radius,
-                    self.y + 10,  # shoot from chest height
+                    self.y + 10,
                     self.z + self.facing_dz * self.radius,
                     self.facing_dx * cfg.BOW_PROJECTILE_SPEED,
-                    0,  # no vertical velocity on arrow
+                    0,
                     self.facing_dz * cfg.BOW_PROJECTILE_SPEED,
                     damage=cfg.BOW_DAMAGE,
                     owner=self,
@@ -181,7 +164,7 @@ class Character:
         return projectile
 
     def tick_physics(self):
-        """Update vertical (jump/gravity) physics."""
+        
         if not self.on_ground:
             self.vy -= cfg.GRAVITY
             self.y += self.vy
@@ -191,7 +174,7 @@ class Character:
                 self.on_ground = True
 
     def tick_cooldowns(self):
-        """Decrement cooldowns each frame."""
+        
         if self.sword_cooldown > 0:
             self.sword_cooldown -= 1
         if self.bow_cooldown > 0:
@@ -224,12 +207,11 @@ class Character:
         self.hit_flash = 0
 
     def distance_to(self, other: Character) -> float:
-        """Horizontal distance (ignoring y)."""
+        
         return math.hypot(self.x - other.x, self.z - other.z)
 
-
 class Projectile:
-    """An arrow or thrown object — moves in 3D."""
+    
 
     def __init__(self, x: float, y: float, z: float,
                  vx: float, vy: float, vz: float,
@@ -253,15 +235,13 @@ class Projectile:
         self.x += self.vx
         self.y += self.vy
         self.z += self.vz
-        # Gravity on arrows (slight arc)
         self.vy -= cfg.GRAVITY * 0.3
         self.lifetime -= 1
         if self.lifetime <= 0 or self.y < -10:
             self.alive = False
 
-
 class Pickup:
-    """A health potion or power-up on the ground."""
+    
 
     def __init__(self, x: float, z: float, pickup_type: str = "potion"):
         self.x = x
